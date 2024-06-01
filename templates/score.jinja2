@@ -1,0 +1,33 @@
+<h3 class="solid-bg">Score: {{ game.right.score }} : {{ game.left.score }} Players: {{ players }}</h3>
+<h1>
+    {% if game.ball.velocity[0] < 0 %}
+        {% if game.ball.velocity[1] < 0 %}
+            ↖
+        {% else %}
+            ↙
+        {% endif %}
+    {% else %}
+        {% if game.ball.velocity[1] < 0 %}
+            ↗
+        {% else %}
+            ↘
+        {% endif %}
+    {% endif %}
+</h1>
+{% if not game.is_running %}
+<div class="fade-in game-paused">
+    <h1>Game paused</h1>
+    <div class="howto">
+        <h3>How to play:</h3>
+        <p>
+            <ul>
+                <li>p: (Un)pause game</li>
+                <li>{{ game.left.up_key }}: Move left bat up</li>
+                <li>{{ game.left.down_key }}: Move left bat down</li>
+                <li>{{ game.right.up_key }}: Move right bat up</li>
+                <li>{{ game.right.down_key }}: Move right bat down</li>
+            </ul>
+        </p>
+    </div>
+</div>
+{% endif %}

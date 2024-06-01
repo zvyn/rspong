@@ -4,7 +4,7 @@
     <title>Hyperpong</title>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="icon" type="image/svg+xml" href="{{ url_for("static", path="favicon.svg") }}">
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg") }}">
     <style>
         html, body {
             overflow: hidden;
@@ -13,7 +13,7 @@
         }
 
         body {
-            background: url("{{ url_for("static", path="bg.svg")}}") #333;
+            background: url("/background.svg") #333;
             font-family: 'Courier New', Courier, monospace;
         }
 
@@ -28,12 +28,11 @@
 
         #bat_left {
             left: 0;
-            height: {{ left.len }}vh;
+            height: 7vh;
         }
 
         #bat_right {
             right: 0;
-            height: {{ right.len }}vh;
         }
 
         .ball {
@@ -99,22 +98,23 @@
     </style>
 </head>
 <body>
+    {% include 'forkme' %}
     <div
         hx-vals='js:{last_key: event && event.key}'
         hx-trigger="
             keyup[key=='p'] from:body,
-            keydown[key=='{{ right.up_key }}'] from:body,
-            keydown[key=='{{ right.down_key }}'] from:body,
-            keydown[key=='{{ left.up_key }}'] from:body,
-            keydown[key=='{{ left.down_key}}'] from:body,
+            keydown[key=='{{ game.right.up_key }}'] from:body,
+            keydown[key=='{{ game.right.down_key }}'] from:body,
+            keydown[key=='{{ game.left.up_key }}'] from:body,
+            keydown[key=='{{ game.left.down_key}}'] from:body,
         "
-        hx-post="{{ url_for("keypress") }}"
+        hx-post="/keypress"
         hx-swap="none"
     >
     </div>
     <div
         hx-vals='js:{x: event && (event.pageX / window.innerWidth), y: event && (event.pageY / window.innerHeight)}'
-        hx-post="{{ url_for("click") }}"
+        hx-post="/click"
         hx-trigger="click from:body"
         hx-swap="none"
     >
@@ -122,32 +122,27 @@
     <div
         class="game"
         hx-ext="sse"
-        sse-connect="{{ url_for("get_game_sse") }}"
+        sse-connect="/game-sse"
     >
         <div
             class="scoreboard"
             id="scoreboard"
             sse-swap="scoreboard"
         >
+            {% include 'scoreboard' %}
         </div>
 
         <div sse-swap="bat_left">
-            {% with player="left", pos=left.pos %}
-                {% include 'bat.jinja2' %}
-            {% endwith %}
+            {% include 'bat_left' %}
         </div>
         <div sse-swap="bat_right">
-            {% with player="right", pos=right.pos %}
-                {% include 'bat.jinja2' %}
-            {% endwith %}
+            {% include 'bat_right' %}
         </div>
 
         <div sse-swap="ball">
-            {% include 'ball.jinja2' %}
+            {% include 'ball' %}
         </div>
     </div>
-    {% include 'forkme.jinja2' %}
-    <script src={{ url_for("static", path="htmx.min.js") }}></script>
-    <script src="{{ url_for("static", path="sse.js") }}"></script>
+    <script src="/scripts.js") }}></script>
 </body>
 </html>
