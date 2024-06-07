@@ -1,5 +1,5 @@
 Proof of concept for demonstrating how HTMX and Server Side Events can be
-combined to build an interactive game with global server-side state.
+combined to build an interactive application with global server-side state.
 
 Requires Rust:
 
