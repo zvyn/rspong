@@ -12,6 +12,7 @@ use axum::{
 use futures_util::stream::Stream;
 use minijinja::{context, Environment};
 use serde::{Deserialize, Serialize};
+use std::{cmp, i32};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::broadcast;
@@ -24,15 +25,15 @@ use tokio_stream::wrappers::BroadcastStream;
 struct Bat {
     up_key: String,
     down_key: String,
-    position: f32,
-    height: f32,
-    score: u8,
+    position: u16,
+    height: u16,
+    score: u16,
 }
 
 #[derive(Clone, Serialize)]
 struct Ball {
-    position: (f32, f32),
-    velocity: (f32, f32),
+    position: (u16, u16),
+    velocity: (i16, i16),
 }
 
 #[derive(Clone, Serialize)]
@@ -41,6 +42,7 @@ struct GameState {
     right: Bat,
     ball: Ball,
     is_running: bool,
+    is_lost: bool,
 }
 
 #[derive(Clone)]
@@ -70,30 +72,78 @@ enum Renderable {
     Ball,
 }
 
+enum Direction {
+    Up,
+    Down,
+}
+
+
+impl Default for Ball {
+    fn default() -> Self {
+        Self {
+            position: (230, 420),
+            velocity: (15, 5),
+        }
+    }
+}
+
+
+impl Bat {
+    fn default_left() -> Self {
+        Self {
+            up_key: "w".to_string(),
+            down_key: "s".to_string(),
+            position: 600,
+            score: 0,
+            height: 200,
+        }
+    }
+
+    fn default_right() -> Self {
+        Self {
+            up_key: "o".to_string(),
+            down_key: "l".to_string(),
+            position: 600,
+            score: 0,
+            height: 200,
+        }
+    }
+
+    fn score_up(&mut self) {
+        self.score += 1;
+        self.height = cmp::max(10, self.height - self.height / 10);
+    }
+}
+
+
+impl GameState {
+    fn reset(&mut self) {
+        self.left = Bat::default_left();
+        self.right = Bat::default_right();
+        self.ball = Ball::default();
+        self.is_running = false;
+        self.is_lost = false;
+    }
+}
+
+
+impl Default for GameState {
+    fn default() -> Self {
+        Self {
+            left: Bat::default_left(),
+            right: Bat::default_right(),
+            ball: Ball::default(),
+            is_running: false,
+            is_lost: false,
+        }
+    }
+}
+
+
 fn get_initial_state(render_tx: mpsc::Sender<Renderable>) -> AppState {
     let (tx, _) = broadcast::channel(50);
     AppState {
-        game: Arc::new(RwLock::new(GameState {
-            left: Bat {
-                up_key: "w".to_string(),
-                down_key: "s".to_string(),
-                position: 40.0,
-                score: 0,
-                height: 20.,
-            },
-            right: Bat {
-                up_key: "o".to_string(),
-                down_key: "l".to_string(),
-                position: 20.0,
-                score: 0,
-                height: 20.,
-            },
-            ball: Ball {
-                position: (23.0, 42.0),
-                velocity: (1.5, 0.5),
-            },
-            is_running: false,
-        })),
+        game: Arc::new(RwLock::new(GameState::default())),
         templates: create_template_env(),
         update_tx: tx,
         renderer: render_tx,
@@ -184,15 +234,15 @@ fn create_template_env() -> Environment<'static> {
     let mut env = Environment::new();
     env.add_template(
         "ball",
-        "<div class=ball style=\"left: {{game.ball.position[0]}}%; top: {{game.ball.position[1]}}%;\"></div>"
+        "<div class=ball style=\"left: {{game.ball.position[0] / 10 }}%; top: {{game.ball.position[1] / 10}}%;\"></div>"
     ).expect("ball template compiled");
     env.add_template(
         "bat_left",
-        "<div id=\"bat_left\" class=bat style=\"top: {{game.left.position}}%; height: {{game.left.height}}vh;\"></div>",
+        "<div id=\"bat_left\" class=bat style=\"top: {{game.left.position / 10}}%; height: {{game.left.height / 10}}vh;\"></div>",
     ).expect("bat left template compiled");
     env.add_template(
         "bat_right",
-        "<div id=\"bat_right\" class=bat style=\"top: {{game.right.position}}%; height: {{game.right.height}}vh;\"></div>",
+        "<div id=\"bat_right\" class=bat style=\"top: {{game.right.position / 10}}%; height: {{game.right.height / 10}}vh;\"></div>",
     ).expect("bat right template");
     env.add_template("scoreboard", include_str!("../templates/score.jinja2"))
         .expect("scoreboard template compiled");
@@ -206,9 +256,16 @@ fn create_template_env() -> Environment<'static> {
 async fn game_loop(state: AppState) {
     loop {
         state.wake_up.notified().await;
+        {
+            let mut game = state.game.write().await;
+            if game.is_lost {
+                game.reset();
+                render_all(&state).await;
+            }
+        }
         while {
             let game = state.game.read().await;
-            game.is_running && state.update_tx.receiver_count() > 0
+            game.is_running && !game.is_lost && state.update_tx.receiver_count() > 0
         } {
             update_ball_position(&state).await;
             sleep(Duration::from_millis(32)).await; // ~ 30Hz
@@ -230,7 +287,7 @@ async fn game_page(State(state): State<AppState>) -> Html<String> {
 
 async fn keypress(State(state): State<AppState>, Form(input): Form<KeyPress>) -> () {
     let mut g = state.game.write().await;
-    let offset = 5.;
+    let offset = 50;
 
     if input.last_key.as_str() == "p" {
         g.is_running = !g.is_running;
@@ -238,16 +295,16 @@ async fn keypress(State(state): State<AppState>, Form(input): Form<KeyPress>) ->
         state.renderer.send(Renderable::Scoreboard).await.unwrap();
     } else if g.is_running {
         if input.last_key == g.left.up_key {
-            move_bat(&mut g.left, offset * -1.);
+            move_bat(&mut g.left, offset, Direction::Up);
             state.renderer.send(Renderable::BatLeft).await.unwrap();
         } else if input.last_key == g.left.down_key {
-            move_bat(&mut g.left, offset);
+            move_bat(&mut g.left, offset, Direction::Down);
             state.renderer.send(Renderable::BatLeft).await.unwrap();
         } else if input.last_key == g.right.up_key {
-            move_bat(&mut g.right, offset * -1.);
+            move_bat(&mut g.right, offset, Direction::Up);
             state.renderer.send(Renderable::BatRight).await.unwrap();
         } else if input.last_key == g.right.down_key {
-            move_bat(&mut g.right, offset);
+            move_bat(&mut g.right, offset, Direction::Down);
             state.renderer.send(Renderable::BatRight).await.unwrap();
         }
     };
@@ -267,11 +324,12 @@ async fn click(State(state): State<AppState>, Form(input): Form<MousePosition>) 
                 (&mut g.right, Renderable::BatRight)
             }
         };
-        let step = bat.height / 2.;
-        if ((input.y * 100.) - (bat.height / 2.)) < bat.position {
-            bat.position = (bat.position - step).max(1.)
+        let step = bat.height / 2;
+        let y = (input.y * 1000.) as u16;
+        if (y - (bat.height / 2)) < bat.position {
+            bat.position = (bat.position - step).max(1)
         } else {
-            bat.position = (bat.position + step).min(100.)
+            bat.position = (bat.position + step).min(1000)
         }
         state.renderer.send(renderable).await.unwrap();
     };
@@ -285,12 +343,14 @@ async fn sse_handler(
     Sse::new(stream).keep_alive(KeepAlive::default())
 }
 
-fn move_bat(b: &mut Bat, offset: f32) {
-    b.position += offset;
-    if offset > 0. && b.position > (100. - b.height) {
-        b.position = 100. - b.height;
-    } else if offset < 0. && b.position < 0. {
-        b.position = 0.;
+fn move_bat(b: &mut Bat, offset: u16, direction: Direction) {
+    match direction {
+        Direction::Up => {
+            b.position = if offset < b.position {b.position - offset} else {0};
+        },
+        Direction::Down => {
+            b.position = cmp::min(1000 - b.height, b.position + offset);
+        }
     }
 }
 
@@ -321,43 +381,53 @@ async fn render_scoreboard(state: &AppState) {
 
 async fn update_ball_position(state: &AppState) {
     let mut g = state.game.write().await;
-    let (x, y) = g.ball.position;
-    g.ball.position = (x + g.ball.velocity.0, y + g.ball.velocity.1);
-    if g.ball.position.0 <= 1. {
-        g.ball.position = (1., g.ball.position.1);
-        g.ball.velocity = (g.ball.velocity.0 * -1., g.ball.velocity.1);
-        if !(g.ball.position.1 > g.left.position
-            && g.ball.position.1 < g.left.position + g.left.height)
+    g.ball.position = (
+        ((g.ball.velocity.0 as i32) + (g.ball.position.0 as i32)) as u16,
+        ((g.ball.velocity.1 as i32) + (g.ball.position.1 as i32)) as u16,
+    );
+    if g.ball.position.0 <= 10 {
+        if g.ball.position.1 > g.left.position
+            && g.ball.position.1 < g.left.position + g.left.height
         {
-            g.left.score += 1;
-            g.left.height *= 1.1;
+            g.ball.position = (10, g.ball.position.1);
+            g.ball.velocity = (g.ball.velocity.0 * -1, g.ball.velocity.1);
+            g.left.score_up();
+            state.renderer.send(Renderable::BatLeft).await.unwrap();
+            state.renderer.send(Renderable::Scoreboard).await.unwrap();
         } else {
-            g.left.height *= 0.9;
+            g.is_lost = true;
+            render_all(state).await;
         }
-        state.renderer.send(Renderable::BatLeft).await.unwrap();
+    } else if g.ball.position.0 >= 990 {
+        if g.ball.position.1 > g.right.position
+            && g.ball.position.1 < g.right.position + g.right.height
+        {
+            g.ball.position = (990, g.ball.position.1);
+            g.ball.velocity = (g.ball.velocity.0 * -1, g.ball.velocity.1);
+            g.right.score_up();
+            state.renderer.send(Renderable::BatRight).await.unwrap();
+            state.renderer.send(Renderable::Scoreboard).await.unwrap();
+        } else {
+            g.is_lost = true;
+            render_all(state).await;
+        }
+    }
+    if g.ball.position.1 <= 0 {
+        g.ball.position = (g.ball.position.0, 0);
+        g.ball.velocity = (g.ball.velocity.0, g.ball.velocity.1 * -1);
         state.renderer.send(Renderable::Scoreboard).await.unwrap();
-    } else if g.ball.position.0 >= 99. {
-        g.ball.position = (99., g.ball.position.1);
-        g.ball.velocity = (g.ball.velocity.0 * -1., g.ball.velocity.1);
-        if !(g.ball.position.1 > g.right.position
-            && g.ball.position.1 < g.right.position + g.right.height)
-        {
-            g.right.score += 1;
-            g.right.height *= 1.1;
-        } else {
-            g.right.height *= 0.9;
-        }
-        state.renderer.send(Renderable::BatRight).await.unwrap();
+    } else if g.ball.position.1 >= 990 {
+        g.ball.position = (g.ball.position.0, 990);
+        g.ball.velocity = (g.ball.velocity.0, g.ball.velocity.1 * -1);
         state.renderer.send(Renderable::Scoreboard).await.unwrap();
     }
-    if g.ball.position.1 <= 0. {
-        g.ball.position = (g.ball.position.0, 0.);
-        g.ball.velocity = (g.ball.velocity.0, g.ball.velocity.1 * -1.);
-        state.renderer.send(Renderable::Scoreboard).await.unwrap();
-    } else if g.ball.position.1 >= 99. {
-        g.ball.position = (g.ball.position.0, 99.);
-        g.ball.velocity = (g.ball.velocity.0, g.ball.velocity.1 * -1.);
-        state.renderer.send(Renderable::Scoreboard).await.unwrap();
-    }
+    state.renderer.send(Renderable::Ball).await.unwrap();
+}
+
+
+async fn render_all(state: &AppState) {
+    state.renderer.send(Renderable::BatLeft).await.unwrap();
+    state.renderer.send(Renderable::BatRight).await.unwrap();
+    state.renderer.send(Renderable::Scoreboard).await.unwrap();
     state.renderer.send(Renderable::Ball).await.unwrap();
 }
