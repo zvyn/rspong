@@ -15,7 +15,18 @@
         {% endif %}
     {% endif %}
 </h1>
-{% if not game.is_running %}
+{% if game.is_lost %}
+<div class="fade-in game-paused">
+    <h1>Game over</h1>
+    <div class="howto">
+        <p>
+            <ul>
+                <li>p: Start a new game</li>
+            </ul>
+        </p>
+    </div>
+</div>
+{% elif not game.is_running %}
 <div class="fade-in game-paused">
     <h1>Game paused</h1>
     <div class="howto">
@@ -27,18 +38,6 @@
                 <li>{{ game.left.down_key }}: Move left bat down</li>
                 <li>{{ game.right.up_key }}: Move right bat up</li>
                 <li>{{ game.right.down_key }}: Move right bat down</li>
-            </ul>
-        </p>
-    </div>
-</div>
-{% endif %}
-{% if game.is_lost %}
-<div class="fade-in game-paused">
-    <h1>Game over</h1>
-    <div class="howto">
-        <p>
-            <ul>
-                <li>p: Start a new game</li>
             </ul>
         </p>
     </div>
