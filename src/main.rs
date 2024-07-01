@@ -326,8 +326,8 @@ async fn click(State(state): State<AppState>, Form(input): Form<MousePosition>) 
         };
         let step = bat.height / 2;
         let y = (input.y * 1000.) as u16;
-        if (y - (bat.height / 2)) < bat.position {
-            bat.position = (bat.position - step).max(1)
+        if y < (bat.position + (bat.height / 2)) {
+            bat.position = if step < bat.position {bat.position - step} else {1}
         } else {
             bat.position = (bat.position + step).min(1000)
         }
